@@ -48,7 +48,7 @@ int main()
 		close(_pipe[1]);
 		char _mesg[100];
 		int j = 0;
-		while(j < 10)
+		while(j < 20)
 		{
 			memset(_mesg, '\0', sizeof(_mesg));
 			int ret = read(_pipe[0], _mesg, sizeof(_mesg));
