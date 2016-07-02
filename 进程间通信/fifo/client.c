@@ -17,21 +17,17 @@
 
 int main()
 {
-	int ret = mkfifo(_PATH_, 0666 | S_IFIFO);
-	if(ret == -1)
-	{
-		printf("mkfifo error\n");
-		return 1;
-	}
 	int fd = open(_PATH_, O_WRONLY);
 	if(fd < 0)
 	{
 		printf("open error\n");
+		return 1;
 	}
 	char buf[_SIZE_];
 	memset(buf, '\0', sizeof(buf));
 	while(1)
 	{
+		printf("please write:");
 		scanf("%s", buf);
 		int ret = write(fd, buf, strlen(buf) + 1);
 		if(ret < 0)
