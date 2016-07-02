@@ -16,6 +16,12 @@
 
 int main()
 {
+	int ret = mkfifo(_PATH_, 0666 | S_IFIFO);
+	if(ret == -1)
+	{
+		printf("mkfifo error\n");
+		return 1;
+	}
 	int fd = open(_PATH_, O_RDONLY);
 	if(fd < 0)
 	{
@@ -29,7 +35,7 @@ int main()
 		int ret = read(fd, buf, sizeof(buf));
 		if(ret <= 0)
 		{
-			printf("read end or error!\n");
+			printf("read and or error!\n");
 			break;
 		}
 		printf("%s\n", buf);
