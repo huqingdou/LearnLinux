@@ -12,27 +12,36 @@ int main()
 		{
 			P_sem_set(c_sem_id);
 			printf("A");
-			fflush(stdout);
 			usleep(30000);
+			fflush(stdout);
 			printf("A");
-			fflush(stdout);
 			usleep(30000);
+			fflush(stdout);
 			V_sem_set(c_sem_id);
 		}
 	}
 	else
 	{
-		int count = 3;
 		while(1)
 		{
 			P_sem_set(sem_id);
 			printf("B");
-			fflush(stdout);
 			usleep(30000);
+			fflush(stdout);
 			printf("B");
-			fflush(stdout);
 			usleep(30000);
+			fflush(stdout);
 			V_sem_set(sem_id);
 		}
+		pid_t ret = waitpid(id, NULL, 0);
+		if(ret == id)
+		{
+			printf("wait success!\n");
+		}
+		else
+		{
+			printf("wait failed!\n");
+		}
 	}
+	return 0;
 }
