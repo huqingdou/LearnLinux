@@ -23,7 +23,7 @@ int main(int argc, int *argv[])
 	struct sockaddr_in server_socket;
 	bzero(&server_socket, sizeof(server_socket));
 	server_socket.sin_family = AF_INET;
-	server_socket.sin_addr.s_addr = htonl(atoi(argv[1]));
+	server_socket.sin_addr.s_addr = inet_addr(argv[1]);
 	server_socket.sin_port = htons(atoi(argv[2]));
 
 	if(bind(sock, (struct sockaddr*)&server_socket, sizeof(server_socket)) < 0)
@@ -42,10 +42,11 @@ int main(int argc, int *argv[])
 
 	printf("bind and listen success, will accept...\n");
 
+	struct sockaddr_in client_socket;
+	socklen_t len = sizeof(client_socket);
+
 	while(1)
 	{
-		socklen_t len = 0;
-		struct sockaddr_in client_socket;
 		int client_sock = accept(sock, (struct sockaddr*)&client_socket, &len);
 		if(client_sock < 0)
 		{
@@ -80,7 +81,7 @@ int main(int argc, int *argv[])
 		}
 	    else if(id > 0)
 		{
-			waitpid(-1, 0, WNOHANG);
+			waitpid(-1, NULL, WNOHANG);
 		}
 	}
 	close(sock);
