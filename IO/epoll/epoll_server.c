@@ -14,6 +14,7 @@
 #include<netinet/in.h>
 #include<arpa/inet.h>
 #include<string.h>
+#include<fcntl.h>
 
 int create_socket(int port, int ip)
 {
@@ -41,6 +42,12 @@ int create_socket(int port, int ip)
 		exit(3);
 	}
 	return sock;
+}
+
+static int set_noblock(int sock)
+{
+	int fl = fcntl(sock, F_GETFL);
+	return fcntl(sock, F_SETFL, fl | O_NONBLOCK);
 }
 
 void epoll_server(int port, int ip)
@@ -87,8 +94,11 @@ void epoll_server(int port, int ip)
 							if(newsock > 0)
 							{
 								printf("get a client, ip is:%s, port is: %d\n", inet_ntoa(peer.sin_addr), ntohs(peer.sin_port));
-								eve.events = EPOLLIN;
+								eve.events = EPOLLIN | EPOLLET;
 								eve.data.fd = newsock;
+
+								set_noblock(newsock);
+
 								epoll_ctl(epfd, EPOLL_CTL_ADD, newsock, &eve);
 
 							}
@@ -97,12 +107,15 @@ void epoll_server(int port, int ip)
 						{
 							if(ready_ev[i].events & EPOLLIN)
 							{
-								char buf[1024];
+								char buf[102400];
 								memset(buf, '\0', sizeof(buf));
 								ssize_t s = recv(fd, buf, sizeof(buf)-1, 0);
 								if(s > 0)
 								{
 									printf("client > %s", buf);
+									eve.events = EPOLLOUT | EPOLLET;
+									eve.data.fd = fd;
+									epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &eve);
 								}
 								else if(s == 0)
 								{
@@ -114,6 +127,13 @@ void epoll_server(int port, int ip)
 								{
 									perror("recv");
 								}
+							}
+							else if(ready_ev[i].events & EPOLLOUT)
+							{
+								const char *msg = "HTTP/1.1 200 OK\r\n\r\n<h1>hello world</h1>\r\n";
+								send(fd, msg, strlen(msg), 0);
+								epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
+								close(fd);
 							}
 						}
 					}
