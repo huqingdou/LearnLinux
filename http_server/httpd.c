@@ -2,6 +2,10 @@
 #include<stdlib.h>
 #include<sys/socket.h>
 #include<netinet/in.h>
+#include<sys/sendfile.h>
+#include<sys/stat.h>
+#include<unistd.h>
+#include<fcntl.h>
 #include<sys/types.h>
 #include<pthread.h>
 #include<string.h>
@@ -77,11 +81,148 @@ static int get_line(int sock, char buf[], int len)
 	return i;
 }
 
+void clear_head(int sock)
+{
+	int ret = 0;
+	char buf[_SIZE_];
+	do{
+		ret = get_line(sock, buf, sizeof(buf));
+	}while(ret > 0 && strcmp(buf, "\n"));
+
+}
+
+void echo_errno(int sock)
+{
+
+}
+
+int echo_www(int sock, const char *path, ssize_t size)
+{
+	int fd = open(path, O_RDONLY);
+	if(fd < 0)
+	{
+		echo_errno(sock);
+		return -1;
+	}
+
+	char buf[_SIZE_];
+	memset(buf, '\0', sizeof(buf));
+	sprintf(buf, "HTTP/1.0 200 OK\r\n\r\n");
+	send(sock, buf, strlen(buf), 0);
+
+	if(sendfile(sock, fd, NULL, size) < 0)
+	{
+		echo_errno(sock);
+		return -2;
+	}
+	close(fd);
+}
+
+static int execute_cgi(int sock, const char *path, const char *method, const char *query_string)
+{
+	int content_len = -1;
+
+	char buf[_SIZE_];
+	memset(buf, '\0', sizeof(buf));
+	if(strcasecmp(method, "GET") == 0)
+	{
+		clear_head(sock);
+	}
+	else
+	{
+		int ret = 0;
+		do{
+			ret = get_line(sock, buf, sizeof(buf));
+			if(ret > 0 && strncasecmp(buf, "Content-Lenth: ", 16) == 0)
+			{
+				content_len = atoi(&buf[16]);
+			}
+		}while(ret > 0 && strcmp(buf, "\n") != 0);
+		if(content_len == -1)
+		{
+			echo_errno(sock);
+			return -2;
+		}
+	}
+
+	//cgi，
+	int cgi_input[2];
+	int cgi_output[2];
+	
+	//printf("");
+	sprintf(buf, "HTTP/1.0 200 OK\r\n\r\n");
+	send(sock, buf, strlen(buf), 0);
+	if(pipe(cgi_input) < 0)
+	{
+		echo_errno(sock);
+		return -3;
+	}
+	if(pipe(cgi_output) < 0)
+	{
+		echo_errno(sock);
+		return -4;
+	}
+
+	pid_t id = fork();
+	if(id == 0)
+	{
+		close(cgi_input[1]);
+		close(cgi_output[0]);
+
+		dup2(cgi_input[0], 0);
+		dup2(cgi_output[1], 1);
+
+		sprintf(buf, "REQUEST_METHOD=%s", method);
+		putenv(buf);
+		if(strcasecmp(method, "GET") == 0)
+		{
+			sprintf(buf, "QUERY_STRING=%s", query_string);
+			putenv(buf);
+		}
+		else
+		{
+			sprintf(buf, "CONTENT_LENGHT=%d", content_len);
+			putenv(buf);
+		}
+
+		execl(path, path, NULL);
+		exit(1);
+	}
+	else
+	{
+		close(cgi_input[0]);
+		close(cgi_output[1]);
+
+		char c = '\0';
+		int i = 0;
+
+		if(strcasecmp(method, "POST") == 0)
+		{
+			for(; i < content_len; i++)
+			{
+				recv(sock, &c, 1, 0);
+				write(cgi_input[1], &c, 1);
+			}
+		}
+
+		while(read(cgi_output[0], &c, 1) > 0)
+		{
+			send(sock, &c, 1, 0);
+		}
+
+		waitpid(id, NULL, 0);
+
+		close(cgi_input[1]);
+		close(cgi_output[0]);
+	}
+}
+
 static void* accept_request(void *arg)
 {
 	int sock = (int)arg;
 	char buf[_SIZE_];
 	int ret = 0;
+
 #ifdef _DEBUG_
 
 	do{
@@ -89,7 +230,7 @@ static void* accept_request(void *arg)
 		printf("%s", buf);
 		fflush(stdout);
 	}while(ret > 0 && strcmp(buf, "\n"));
-
+	close(sock);
 #endif
 
 	char method[_SIZE_/10];
@@ -105,7 +246,7 @@ static void* accept_request(void *arg)
 	ret = get_line(sock, buf, sizeof(buf));
 	if(ret < 0)
 	{
-	//	echo_errno(sock);
+		echo_errno(sock);
 		return (void*)-1;
 	}
 
@@ -125,13 +266,13 @@ static void* accept_request(void *arg)
 	//check method
 	if((strcasecmp(method, "GET") != 0) && (strcasecmp(method, "POST") != 0))
 	{
-	//	echo_errno(sock);
+		echo_errno(sock);
 		return (void*)-2;
 	}
 
 	//get url
 	//先越过空格
-	while(isspace(buf[j]))
+	while(isspace(buf[j]) && j < sizeof(buf))
 	{
 		++j;
 	}
@@ -143,34 +284,82 @@ static void* accept_request(void *arg)
 		++i;
 		++j;
 	}
+
 	printf("method: %s, url_path: %s\n", method, url);
 
-	char *start = url;
 	char *query_string = 0;
 	int cgi = 0;
-	while(*start != '\0')
+	
+	
+	if(strcasecmp(method, "POST") == 0)
 	{
-		if(*start == '?')
-		{
-			cgi = 1;
-			*start = '\0';
-			query_string = start+1;
-			break;
-		}
-		start++;
+		cgi = 1;
 	}
 
-	//if(strcmp(url,"/") == 0)
+	if(strcasecmp(method, "GET") == 0)
+	{
+		query_string = url;
+		while(*query_string != '?' && *query_string != '\0')
+		{
+			query_string++;
+		}
+		if(*query_string == '?')
+		{
+			*query_string = '\0';
+			query_string++;
+			cgi = 1;
+		}
+	}
+
+
+	//if(strcasecmp(url,"/") == 0)
 	//{
 	//	strcpy(url, "index.html");
 	//}
 	
-	sprintf(path, "htdoc/%s", url);
+	sprintf(path, "htdoc%s", url);
 	if(path[strlen(path)-1] == '/')
 	{
 		strcat(path, "index.html");
 	}
+
+	//path, cgi,query_string, method
 	printf("path: %s\n", path);
+	struct stat st;
+	if(stat(path, &st) < 0)
+	{
+		echo_errno(sock);
+		return (void*)-3;
+	}
+	else
+	{
+
+		if(S_ISDIR(st.st_mode))
+		{
+			strcat(path, "htdoc/index.html");
+		}
+		else if((st.st_mode & S_IXUSR) || (st.st_mode & S_IXGRP) || (st.st_mode & S_IXOTH))
+		{
+			cgi = 1;
+		}
+		else
+		{
+			//do nothing
+		}
+	
+		if(cgi)
+		{	
+			execute_cgi(sock, path, method, query_string);
+		}
+		else
+		{
+			clear_head(sock);
+			echo_www(sock, path, st.st_size);
+		}
+	}
+
+	//close(sock); //不面向连接
+
 	return (void*)0;
 }
 
