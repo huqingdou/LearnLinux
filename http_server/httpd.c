@@ -17,6 +17,20 @@ static void Usage(const char* proc)
 	printf("Usage: %s ip port\n", proc);
 }
 
+static void bad_request(int sock)
+{
+
+	char buf[1024];
+	sprintf(buf, "HTTP/1.0 400 BAD REQUEST\r\n");
+	send(sock, buf, strlen(buf), 0);
+	sprintf(buf, "Content-type: text/html\r\n");
+	send(sock, buf, strlen(buf), 0);
+	sprintf(buf, "\r\n");
+	send(sock, buf, strlen(buf), 0);
+	sprintf(buf, "<html><br><p>your enter message is a bad request</p></br></html>\r\n");
+	send(sock, buf, strlen(buf), 0);
+}
+
 int create_listen_sock(int ip, int port)
 {
 	int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -91,9 +105,18 @@ void clear_head(int sock)
 
 }
 
-void echo_errno(int sock)
+void echo_errno(int sock, int number)
 {
-
+	switch(number)
+	{
+		case 404:
+			//not_found(sock);
+			break;
+		case 403:
+			bad_request(sock);
+			break;
+	}
+	close(sock);
 }
 
 int echo_www(int sock, const char *path, ssize_t size)
@@ -101,7 +124,7 @@ int echo_www(int sock, const char *path, ssize_t size)
 	int fd = open(path, O_RDONLY);
 	if(fd < 0)
 	{
-		echo_errno(sock);
+		//echo_errno(sock);
 		return -1;
 	}
 
@@ -112,7 +135,7 @@ int echo_www(int sock, const char *path, ssize_t size)
 
 	if(sendfile(sock, fd, NULL, size) < 0)
 	{
-		echo_errno(sock);
+		//echo_errno(sock);
 		return -2;
 	}
 	close(fd);
@@ -128,7 +151,7 @@ static int execute_cgi(int sock, const char *path, const char *method, const cha
 	{
 		clear_head(sock);
 	}
-	else
+	else          //POST
 	{
 		int ret = 0;
 		do{
@@ -140,7 +163,7 @@ static int execute_cgi(int sock, const char *path, const char *method, const cha
 		}while(ret > 0 && strcmp(buf, "\n") != 0);
 		if(content_len == -1)
 		{
-			echo_errno(sock);
+		//	echo_errno(sock);
 			return -2;
 		}
 	}
@@ -149,19 +172,26 @@ static int execute_cgi(int sock, const char *path, const char *method, const cha
 	int cgi_input[2];
 	int cgi_output[2];
 	
-	//printf("");
+	printf("Content_Length:%d\n",content_len);
 	sprintf(buf, "HTTP/1.0 200 OK\r\n\r\n");
 	send(sock, buf, strlen(buf), 0);
 	if(pipe(cgi_input) < 0)
 	{
-		echo_errno(sock);
+	//	echo_errno(sock);
 		return -3;
 	}
 	if(pipe(cgi_output) < 0)
 	{
-		echo_errno(sock);
+	//	echo_errno(sock);
 		return -4;
 	}
+
+	char query_env[_SIZE_];
+	char method_env[_SIZE_];
+	char content_len_env[_SIZE_];
+	memset(method_env, '\0', sizeof(method_env));
+	memset(query_env, '\0', sizeof(query_env));
+	memset(content_len_env, '\0', sizeof(content_len_env));
 
 	pid_t id = fork();
 	if(id == 0)
@@ -172,17 +202,17 @@ static int execute_cgi(int sock, const char *path, const char *method, const cha
 		dup2(cgi_input[0], 0);
 		dup2(cgi_output[1], 1);
 
-		sprintf(buf, "REQUEST_METHOD=%s", method);
-		putenv(buf);
+		sprintf(method_env, "REQUEST_METHOD=%s", method);
+		putenv(method_env);
 		if(strcasecmp(method, "GET") == 0)
 		{
-			sprintf(buf, "QUERY_STRING=%s", query_string);
-			putenv(buf);
+			sprintf(query_env, "QUERY_STRING=%s", query_string);
+			putenv(query_env);
 		}
-		else
+		else //POST
 		{
-			sprintf(buf, "CONTENT_LENGHT=%d", content_len);
-			putenv(buf);
+			sprintf(content_len_env, "CONTENT_LENGHT=%d", content_len);
+			putenv(content_len_env);
 		}
 
 		execl(path, path, NULL);
@@ -219,6 +249,8 @@ static int execute_cgi(int sock, const char *path, const char *method, const cha
 
 static void* accept_request(void *arg)
 {
+
+
 	int sock = (int)arg;
 	char buf[_SIZE_];
 	int ret = 0;
@@ -231,6 +263,7 @@ static void* accept_request(void *arg)
 		fflush(stdout);
 	}while(ret > 0 && strcmp(buf, "\n"));
 	close(sock);
+	return NULL;
 #endif
 
 	char method[_SIZE_/10];
@@ -246,7 +279,7 @@ static void* accept_request(void *arg)
 	ret = get_line(sock, buf, sizeof(buf));
 	if(ret < 0)
 	{
-		echo_errno(sock);
+	//	echo_errno(sock);
 		return (void*)-1;
 	}
 
@@ -266,7 +299,7 @@ static void* accept_request(void *arg)
 	//check method
 	if((strcasecmp(method, "GET") != 0) && (strcasecmp(method, "POST") != 0))
 	{
-		echo_errno(sock);
+	//	echo_errno(sock);
 		return (void*)-2;
 	}
 
@@ -328,7 +361,7 @@ static void* accept_request(void *arg)
 	struct stat st;
 	if(stat(path, &st) < 0)
 	{
-		echo_errno(sock);
+	//	echo_errno(sock);
 		return (void*)-3;
 	}
 	else
