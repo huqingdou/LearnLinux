@@ -31,6 +31,33 @@ static void bad_request(int sock)
 	send(sock, buf, strlen(buf), 0);
 }
 
+void not_found(int sock)
+{
+	char buf[1024];
+	sprintf(buf, "HTTP/1.0 404 NOT_FOUND\r\n");
+	send(sock, buf, strlen(buf), 0);
+	sprintf(buf, "Content-type: text/html\r\n");
+	send(sock, buf, strlen(buf), 0);
+	sprintf(buf, "\r\n");
+	send(sock, buf, strlen(buf), 0);
+	sprintf(buf, "<html><br><p>Not found, The server could not fulfill</p></br></html>\r\n");
+	send(sock, buf, strlen(buf), 0);
+}
+
+void cannot_execute(int sock)
+{
+
+	char buf[1024];
+	sprintf(buf, "HTTP/1.0 500 Internal Server Error\r\n");
+	send(sock, buf, strlen(buf), 0);
+	sprintf(buf, "Content-type: text/html\r\n");
+	send(sock, buf, strlen(buf), 0);
+	sprintf(buf, "\r\n");
+	send(sock, buf, strlen(buf), 0);
+	sprintf(buf, "<html><br><p>Error prohibited CGI execution.</p></br></html>\r\n");
+	send(sock, buf, strlen(buf), 0);
+}
+
 int create_listen_sock(int ip, int port)
 {
 	int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -71,23 +98,31 @@ static int get_line(int sock, char buf[], int len)
 	}
 
 	int i = 0;
-	char ch;
-	while(i < len && ch != '\n')
+	int ret = 0;
+	char ch = '\0';
+	while(i < len - 1 && ch != '\n')
 	{
-		recv(sock, &ch, 1, 0);
-		if(ch == '\r')
+		ret = recv(sock, &ch, 1, 0);
+		if(ret > 0)
 		{
-			recv(sock, &ch, 1, MSG_PEEK);
-			if(ch == '\n')
+			if(ch == '\r')
 			{
-				recv(sock, &ch, 1, 0);
+				recv(sock, &ch, 1, MSG_PEEK);
+				if(ch == '\n')
+				{
+					recv(sock, &ch, 1, 0);
+				}
+				else
+				{
+					ch = '\n';
+				}
 			}
-			else
-			{
-				ch = '\n';
-			}
+			buf[i++] = ch;
 		}
-		buf[i++] = ch;
+		else
+		{
+			ch = '\n';
+		}
 	}
 
 	buf[i] = '\0';
@@ -99,9 +134,10 @@ void clear_head(int sock)
 {
 	int ret = 0;
 	char buf[_SIZE_];
+	memset(buf, '\0', sizeof(buf));
 	do{
 		ret = get_line(sock, buf, sizeof(buf));
-	}while(ret > 0 && strcmp(buf, "\n"));
+	}while(ret > 0 && strcmp(buf, "\n") != 0);
 
 }
 
@@ -109,11 +145,17 @@ void echo_errno(int sock, int number)
 {
 	switch(number)
 	{
-		case 404:
-			//not_found(sock);
-			break;
-		case 403:
+		case 400:
 			bad_request(sock);
+			break;
+		case 404:
+			not_found(sock);
+			break;
+		case 500:
+			cannot_execute(sock);
+			break;
+		default:
+			perror("error_code");
 			break;
 	}
 	close(sock);
@@ -124,7 +166,7 @@ int echo_www(int sock, const char *path, ssize_t size)
 	int fd = open(path, O_RDONLY);
 	if(fd < 0)
 	{
-		//echo_errno(sock);
+		echo_errno(sock, 404);
 		return -1;
 	}
 
@@ -135,7 +177,7 @@ int echo_www(int sock, const char *path, ssize_t size)
 
 	if(sendfile(sock, fd, NULL, size) < 0)
 	{
-		//echo_errno(sock);
+		echo_errno(sock, 404);
 		return -2;
 	}
 	close(fd);
@@ -144,45 +186,46 @@ int echo_www(int sock, const char *path, ssize_t size)
 static int execute_cgi(int sock, const char *path, const char *method, const char *query_string)
 {
 	int content_len = -1;
-
+	int ret = 0;
 	char buf[_SIZE_];
-	memset(buf, '\0', sizeof(buf));
+
 	if(strcasecmp(method, "GET") == 0)
 	{
 		clear_head(sock);
 	}
 	else          //POST
 	{
-		int ret = 0;
 		do{
+			memset(buf, '\0', sizeof(buf));
 			ret = get_line(sock, buf, sizeof(buf));
-			if(ret > 0 && strncasecmp(buf, "Content-Lenth: ", 16) == 0)
+			if(strncasecmp(buf, "Content-Length: ", strlen("Content-Length: ")) == 0)
 			{
 				content_len = atoi(&buf[16]);
 			}
 		}while(ret > 0 && strcmp(buf, "\n") != 0);
+
 		if(content_len == -1)
 		{
-		//	echo_errno(sock);
+			echo_errno(sock, 400);
 			return -2;
 		}
 	}
 
 	//cgi，
-	int cgi_input[2];
-	int cgi_output[2];
-	
-	printf("Content_Length:%d\n",content_len);
+	int cgi_input[2] = {0, 0};
+	int cgi_output[2] = {0, 0};
+	//printf("Content_Length:%d\n",content_len);
+
 	sprintf(buf, "HTTP/1.0 200 OK\r\n\r\n");
 	send(sock, buf, strlen(buf), 0);
 	if(pipe(cgi_input) < 0)
 	{
-	//	echo_errno(sock);
+		echo_errno(sock, 404);
 		return -3;
 	}
 	if(pipe(cgi_output) < 0)
 	{
-	//	echo_errno(sock);
+		echo_errno(sock, 404);
 		return -4;
 	}
 
@@ -211,7 +254,7 @@ static int execute_cgi(int sock, const char *path, const char *method, const cha
 		}
 		else //POST
 		{
-			sprintf(content_len_env, "CONTENT_LENGHT=%d", content_len);
+			sprintf(content_len_env, "CONTENT_LENGTH=%d", content_len);
 			putenv(content_len_env);
 		}
 
@@ -240,16 +283,15 @@ static int execute_cgi(int sock, const char *path, const char *method, const cha
 			send(sock, &c, 1, 0);
 		}
 
-		waitpid(id, NULL, 0);
-
 		close(cgi_input[1]);
 		close(cgi_output[0]);
+
+		waitpid(id, NULL, 0);
 	}
 }
 
 static void* accept_request(void *arg)
 {
-
 
 	int sock = (int)arg;
 	char buf[_SIZE_];
@@ -279,7 +321,7 @@ static void* accept_request(void *arg)
 	ret = get_line(sock, buf, sizeof(buf));
 	if(ret < 0)
 	{
-	//	echo_errno(sock);
+		echo_errno(sock, 400);
 		return (void*)-1;
 	}
 
@@ -294,12 +336,12 @@ static void* accept_request(void *arg)
 	}
 
 	method[i] = '\0';
-	printf("method: %s\n", method);
+//	printf("method: %s\n", method);
 	
 	//check method
 	if((strcasecmp(method, "GET") != 0) && (strcasecmp(method, "POST") != 0))
 	{
-	//	echo_errno(sock);
+		echo_errno(sock, 400);
 		return (void*)-2;
 	}
 
@@ -318,9 +360,9 @@ static void* accept_request(void *arg)
 		++j;
 	}
 
-	printf("method: %s, url_path: %s\n", method, url);
+//	printf("method: %s, url_path: %s\n", method, url);
 
-	char *query_string = 0;
+	char *query_string = NULL;
 	int cgi = 0;
 	
 	
@@ -357,11 +399,11 @@ static void* accept_request(void *arg)
 	}
 
 	//path, cgi,query_string, method
-	printf("path: %s\n", path);
+//	printf("path: %s\n", path);
 	struct stat st;
 	if(stat(path, &st) < 0)
 	{
-	//	echo_errno(sock);
+		echo_errno(sock, 404);
 		return (void*)-3;
 	}
 	else
@@ -391,14 +433,14 @@ static void* accept_request(void *arg)
 		}
 	}
 
-	//close(sock); //不面向连接
+	close(sock); //不面向连接
 
 	return (void*)0;
 }
 
 int main(int argc, char *argv[])
 {
-	if(argc != 3)   //getopt
+	if(argc != 3)
 	{
 		Usage(argv[0]);
 		exit(1);

@@ -33,6 +33,7 @@ void math(char *arg)
 		data = atoi(arr[i++]);
 		sum += data;
 	}
+	printf("data1 + data2 = %d", sum);
 
 	printf("</body>");
 	printf("</html>");
@@ -50,12 +51,13 @@ int main()
 	if(getenv("REQUEST_METHOD"))
 	{
 		strcpy(method, getenv("REQUEST_METHOD"));
+	//	printf("method:%s\n", method);
 	}
 	if(strcasecmp(method, "GET") == 0)
 	{
 		if(getenv("QUERY_STRING"))
 		{
-			strcpy(arg, getenv(QUERY_ATRING));
+			strcpy(arg, getenv("QUERY_ATRING"));
 		}
 	}
 	else if(strcasecmp(method, "POST") == 0)
@@ -74,7 +76,7 @@ int main()
 		else{
 			
 		}
-		//printf("hehe, %s\n", arg);
+		//printf("arg: %s\n", arg);
 		math(arg);
 	}
 	return 0;
