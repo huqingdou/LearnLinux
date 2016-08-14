@@ -4,8 +4,8 @@ BIN=httpd
 SRC=httpd.c
 OBJ=$(SRC:.c=.o)
 CC=gcc
-FLAGS=-g #-D_DEBUG_
-LDFLAGS=-g -lpthread
+FLAGS=#-D_DEBUG_
+LDFLAGS=-lpthread
 
 .PHONY:all
 all:$(BIN) cgi
@@ -25,22 +25,21 @@ cgi:
 	done
 
 .PHONY:output
+output:
+	mkdir -p output/lib
 	mkdir -p output/htdoc/cgi
-	cp httpd output
-	cp -rf conf output
+	cp -f httpd output
+	cp htdoc/cgi/math_cgi output/htdoc/cgi
+	cp htdoc/cgi/register_cgi output/htdoc/cgi
+	cp htdoc/cgi/student_show_cgi output/htdoc/cgi
+	cp htdoc/index.html output/htdoc
+	cp htdoc/register.html output/htdoc
 	cp start.sh output
-	cp -rf htdoc/* output/htdoc
-	for name in `echo $(CGI_PATH);`\
-	do\
-		cd $$name;\
-		make output;\
-		cd -;\
-	done
-
+	cp lib/lib/* output/lib
 
 .PHONY:clean
 clean:
-	rm -rf $(BIN) output
+	rm -rf *.o $(BIN) output
 	for name in `echo $(CGI_PATH)`;\
 	do\
 		cd $$name;\
