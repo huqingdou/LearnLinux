@@ -10,7 +10,7 @@ using namespace std;
 #include<stdlib.h>
 #include<netinet/in.h>
 #include<pthread.h>
-#include<string>
+#include<string.h>
 #include "data_pool.h"
 #include "comm.h"
 #include "udp_data.h"

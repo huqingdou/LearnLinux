@@ -5,15 +5,15 @@ my_json::my_json()
 
 void my_json::serialize(Json::Value &_v, string &_out)
 {
-#ifdef FAST
+//#ifdef FAST
 	Json::FastWriter _w;
-#else
+//#else
 	_out = _w.write(_v);
-#endif
+//#endif
 }
 
 
-void unserialize(string &_in, Json::Value &_v)
+void my_json::unserialize(string &_in, Json::Value &_v)
 {
 	Json::Reader _r;
 	_r.parse(_in, _v, false);
